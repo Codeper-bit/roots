@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.routes.health import router as health_router
+
 from app.core.config import get_settings
 from app.core.database import close_pool, create_pool
 
@@ -23,7 +25,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    return FastAPI(title="Roots API", version="0.1.0", lifespan=lifespan)
+    application = FastAPI(title="Roots API", version="0.1.0", lifespan=lifespan)
+    application.include_router(health_router)
+    return application
 
 
 app = create_app()
