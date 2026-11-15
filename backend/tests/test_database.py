@@ -208,7 +208,7 @@ async def test_only_one_active_consent_per_purpose_but_history_is_kept(conn: asy
             await f.insert_consent(conn, participant, purpose="transcription")
 
     # Withdraw, then grant again: allowed, and both rows remain.
-    await conn.execute("UPDATE consent_records SET status = 'withdrawn', withdrawn_at = now() WHERE id = $1", first)
+    await conn.execute("UPDATE consent_records SET status = 'withdrawn', withdrawn_at = clock_timestamp() WHERE id = $1", first)
     await f.insert_consent(conn, participant, purpose="transcription")
     assert await conn.fetchval("SELECT count(*) FROM consent_records WHERE participant_id = $1", participant) == 2
 
