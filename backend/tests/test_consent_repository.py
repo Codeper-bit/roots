@@ -1,14 +1,14 @@
-
 from app.repositories.consent_repository import (
     get_consent_by_id,
     list_participant_consents,
+    create_consent_record,
+    get_active_consent,
+    withdraw_consent,
 )
 from uuid import uuid4
 
 import asyncpg
 import pytest
-
-from app.repositories.consent_repository import create_consent_record
 from tests import factories as f
 
 
@@ -200,3 +200,69 @@ async def test_list_consents_does_not_return_other_participants_records(
     records = await list_participant_consents(conn, participant_b)
 
     assert records == []
+
+
+async def test_get_active_consent(conn):
+    participant = await create_participant(conn)
+
+    created = await create_consent_record(
+        conn,
+        participant_id=participant,
+        purpose="transcription",
+        status="granted",
+    )
+
+    result = await get_active_consent(
+        conn,
+        participant,
+        "transcription",
+    )
+
+    assert result is not None
+    assert result["id"] == created["id"]
+
+
+async def test_get_active_consent_returns_none_when_absent(conn):
+    participant = await create_participant(conn)
+
+    result = await get_active_consent(
+        conn,
+        participant,
+        "transcription",
+    )
+
+    assert result is None
+
+
+async def test_withdraw_consent(conn):
+    participant = await create_participant(conn)
+
+    created = await create_consent_record(
+        conn,
+        participant_id=participant,
+        purpose="transcription",
+        status="granted",
+    )
+
+    result = await withdraw_consent(conn, created["id"])
+
+    assert result is not None
+    assert result["status"] == "withdrawn"
+    assert result["withdrawn_at"] is not None
+
+
+async def test_cannot_withdraw_consent_twice(conn):
+    participant = await create_participant(conn)
+
+    created = await create_consent_record(
+        conn,
+        participant_id=participant,
+        purpose="transcription",
+        status="granted",
+    )
+
+    await withdraw_consent(conn, created["id"])
+
+    result = await withdraw_consent(conn, created["id"])
+
+    assert result is None

@@ -80,3 +80,39 @@ async def list_participant_consents(
     """
 
     return await conn.fetch(query, participant_id)
+
+
+async def get_active_consent(
+    conn: asyncpg.Connection,
+    participant_id: UUID,
+    purpose: str,
+) -> asyncpg.Record | None:
+    query = """
+        SELECT *
+        FROM consent_records
+        WHERE participant_id = $1
+          AND purpose = $2
+          AND status = 'granted'
+    """
+
+    return await conn.fetchrow(
+        query,
+        participant_id,
+        purpose,
+    )
+
+
+async def withdraw_consent(
+    conn: asyncpg.Connection,
+    consent_id: UUID,
+) -> asyncpg.Record | None:
+    query = """
+        UPDATE consent_records
+        SET status = 'withdrawn',
+            withdrawn_at = NOW()
+        WHERE id = $1
+          AND status = 'granted'
+        RETURNING *
+    """
+
+    return await conn.fetchrow(query, consent_id)
