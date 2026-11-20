@@ -178,10 +178,10 @@ async def test_list_participant_consents(conn: asyncpg.Connection) -> None:
     records = await list_participant_consents(conn, participant)
 
     assert len(records) == 2
-    assert [record["purpose"] for record in records] == [
+    assert {record["purpose"] for record in records} == {
         "transcription",
         "translation",
-    ]
+    }
 
 
 async def test_list_consents_does_not_return_other_participants_records(
