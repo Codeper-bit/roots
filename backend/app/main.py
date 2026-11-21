@@ -8,7 +8,7 @@ from app.api.routes.health import router as health_router
 
 from app.core.config import get_settings
 from app.core.database import close_pool, create_pool
-from app.api_routes.stories import router as stories_router
+from app.api.routes.stories import router as stories_router
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ def create_app() -> FastAPI:
     application = FastAPI(
         title="Roots API", version="0.1.0", lifespan=lifespan)
     application.include_router(health_router)
+    application.include_router(stories_router)
     return application
 
 
