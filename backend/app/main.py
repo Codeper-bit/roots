@@ -18,6 +18,7 @@ from app.api.routes.transcription import router as transcription_router
 
 from app.core.config import get_settings
 from app.core.database import close_pool, create_pool
+from app.core.storage import create_storage_client
 
 
 logger = logging.getLogger(__name__)
@@ -28,11 +29,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     pool = await create_pool(settings)
 
-    app.state.db_pool = pool
+    storage_client = None
 
     try:
+        if getattr(settings, "r2_bucket_name", None):
+            storage_client = create_storage_client(settings)
+
+        app.state.db_pool = pool
+        app.state.storage_client = storage_client
+        app.state.storage_bucket = getattr(settings, "r2_bucket_name", None)
+
         yield
+
     finally:
+        if storage_client is not None:
+            storage_client.close()
+
         await close_pool(pool)
 
 
