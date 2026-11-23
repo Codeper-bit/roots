@@ -3,7 +3,7 @@ import logging
 from uuid import UUID, uuid4
 
 import asyncpg
-from botocore.client import BaseClient
+from supabase import Client
 
 from app.repositories import audio_repository
 from app.services import consent_service, storage_service
@@ -41,11 +41,11 @@ async def upload_audio_asset(
     story_id: UUID,
     audio_data: bytes,
     mime_type: str,
-    storage_client: BaseClient,
+    storage_client: Client,
     bucket_name: str,
     duration_ms: int | None = None,
 ) -> asyncpg.Record:
-    """Coordinate consent, database metadata, and R2 audio upload."""
+    """Coordinate consent, database metadata, and supabase audio upload."""
 
     await consent_service.require_active_consent(
         conn,

@@ -21,9 +21,12 @@ class FakePool:
             raise OSError("database unavailable")
         yield FakeConnection()
 
+    async def close(self) -> None:
+        pass
+
 
 class FakeSettings:
-    pass
+    supabase_storage_bucket = "roots-audio"
 
 
 def make_client(monkeypatch, pool: FakePool) -> TestClient:
@@ -36,8 +39,12 @@ def make_client(monkeypatch, pool: FakePool) -> TestClient:
         assert received_pool is pool
 
     monkeypatch.setattr(main_module, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(
+        main_module,
+        "create_storage_client",
+        lambda settings: object(),
+    )
     monkeypatch.setattr(main_module, "create_pool", fake_create_pool)
-    monkeypatch.setattr(main_module, "close_pool", fake_close_pool)
 
     return TestClient(create_app())
 

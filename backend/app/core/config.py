@@ -15,16 +15,16 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
 
+    # PostgreSQL configuration
     database_url: SecretStr
     db_pool_min_size: int = Field(default=2, ge=1)
     db_pool_max_size: int = Field(default=10, ge=1)
     db_command_timeout: float = Field(default=30.0, gt=0)
 
-    # Cloudflare R2 configuration (optional until storage is configured).
-    r2_account_id: str | None = None
-    r2_access_key_id: SecretStr | None = None
-    r2_secret_access_key: SecretStr | None = None
-    r2_bucket_name: str | None = None
+    # Supabase Storage configuration
+    supabase_url: str
+    supabase_service_role_key: SecretStr
+    supabase_storage_bucket: str = "roots-audio"
 
     @field_validator("database_url")
     @classmethod
@@ -37,6 +37,15 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("supabase_url")
+    @classmethod
+    def _check_supabase_url(cls, value: str) -> str:
+        if not value.startswith(("https://", "http://")):
+            raise ValueError(
+                "SUPABASE_URL must be a valid HTTP or HTTPS URL."
+            )
+        return value.rstrip("/")
+
     @model_validator(mode="after")
     def _check_pool_sizes(self) -> "Settings":
         if self.db_pool_min_size > self.db_pool_max_size:
@@ -45,25 +54,8 @@ class Settings(BaseSettings):
             )
         return self
 
-    @model_validator(mode="after")
-    def _check_r2_configuration(self) -> "Settings":
-        r2_values = (
-            self.r2_account_id,
-            self.r2_access_key_id,
-            self.r2_secret_access_key,
-            self.r2_bucket_name,
-        )
-
-        if any(value is not None for value in r2_values):
-            if not all(value is not None for value in r2_values):
-                raise ValueError(
-                    "All R2 settings must be provided when configuring storage."
-                )
-
-        return self
-
 
 @lru_cache
 def get_settings() -> Settings:
-    """Load settings once and reuse them. Tests can call get_settings.cache_clear()."""
+    """Load settings once and reuse them."""
     return Settings()

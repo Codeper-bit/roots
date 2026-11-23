@@ -29,22 +29,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     pool = await create_pool(settings)
 
-    storage_client = None
-
     try:
-        if getattr(settings, "r2_bucket_name", None):
-            storage_client = create_storage_client(settings)
+        storage_client = create_storage_client(settings)
 
         app.state.db_pool = pool
         app.state.storage_client = storage_client
-        app.state.storage_bucket = getattr(settings, "r2_bucket_name", None)
+        app.state.storage_bucket = settings.supabase_storage_bucket
 
         yield
 
     finally:
-        if storage_client is not None:
-            storage_client.close()
-
         await close_pool(pool)
 
 
