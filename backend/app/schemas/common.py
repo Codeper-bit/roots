@@ -1,13 +1,21 @@
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class Schema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def convert_mapping_to_dict(cls, value):
+        if isinstance(value, Mapping):
+            return dict(value)
+        return value
 
 
 StoryStatus = Literal["draft", "processing", "in_review", "completed"]
