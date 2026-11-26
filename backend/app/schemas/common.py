@@ -3,7 +3,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
-
+import asyncpg
 from pydantic import BaseModel, ConfigDict, model_validator
 
 
@@ -12,8 +12,8 @@ class Schema(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def convert_mapping_to_dict(cls, value):
-        if isinstance(value, Mapping):
+    def convert_asyncpg_record(cls, value):
+        if isinstance(value, asyncpg.Record):
             return dict(value)
         return value
 

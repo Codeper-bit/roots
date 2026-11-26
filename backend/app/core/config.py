@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     supabase_service_role_key: SecretStr
     supabase_storage_bucket: str = "roots-audio"
 
+    # Groq transcription configuration
+    groq_api_key: SecretStr | None = None
+    groq_transcription_model: str = "whisper-large-v3-turbo"
+
     @field_validator("database_url")
     @classmethod
     def _check_database_url_scheme(cls, value: SecretStr) -> SecretStr:

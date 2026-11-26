@@ -1,0 +1,11 @@
+import { get, post } from './client'
+import type { Story, StoryCreate, StoryList, UUID } from '../types'
+
+export const createStory = (payload: StoryCreate) => post<Story>('/stories', payload)
+
+// The backend requires owner_id on reads until authentication exists.
+export const listStories = (ownerId: UUID, signal?: AbortSignal) =>
+  get<StoryList>('/stories', { query: { owner_id: ownerId }, signal })
+
+export const getStory = (storyId: UUID, ownerId: UUID, signal?: AbortSignal) =>
+  get<Story>(`/stories/${storyId}`, { query: { owner_id: ownerId }, signal })
