@@ -1,3 +1,4 @@
+
 import asyncio
 from typing import Any
 
@@ -60,21 +61,21 @@ class GroqTranscriptionEngine:
         audio_asset: Any,
         language_code: str | None,
     ) -> str:
+
+        # Database column is mime_type, NOT content_type.
         storage_key = audio_asset["storage_key"]
-        content_type = audio_asset["content_type"]
+        mime_type = audio_asset["mime_type"]
 
-        extension = CONTENT_TYPE_EXTENSIONS.get(content_type)
-        mime_type = CONTENT_TYPE_MIME.get(content_type)
+        extension = CONTENT_TYPE_EXTENSIONS.get(mime_type)
+        groq_mime_type = CONTENT_TYPE_MIME.get(mime_type)
 
-        if extension is None or mime_type is None:
+        if extension is None or groq_mime_type is None:
             raise ValueError(
-                f"Audio format '{content_type}' is not supported by "
-                "the configured Groq transcription endpoint. "
-                "Upload an MP3, WAV, M4A, MP4, OGG, FLAC, or WebM file."
+                f"Audio format '{mime_type}' is not supported. "
+                "Use MP3, WAV, M4A, MP4, OGG, FLAC, or WebM."
             )
 
-        # Supabase's standard Client is synchronous, so keep its download
-        # operation off FastAPI's event loop.
+        # Download audio from private Supabase Storage.
         audio_bytes = await asyncio.to_thread(
             self.storage_client.storage
             .from_(self.bucket_name)
@@ -87,12 +88,15 @@ class GroqTranscriptionEngine:
 
         if len(audio_bytes) > MAX_GROQ_AUDIO_SIZE:
             raise ValueError(
-                "This audio file exceeds Groq's 25 MB free-tier "
-                "upload limit. Use a smaller audio file."
+                "The audio file exceeds the configured 25 MB limit."
             )
 
         request_args = {
-            "file": (f"recording{extension}", audio_bytes, mime_type),
+            "file": (
+                f"recording{extension}",
+                audio_bytes,
+                groq_mime_type,
+            ),
             "model": self.model,
             "response_format": "json",
             "temperature": 0.0,
