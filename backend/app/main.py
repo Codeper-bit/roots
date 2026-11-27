@@ -1,11 +1,8 @@
 
 import logging
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-
-
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
@@ -18,6 +15,7 @@ from app.api.routes.content import router as content_router
 from app.api.routes.reviews import router as reviews_router
 from app.api.routes.story_questions import router as story_questions_router
 from app.api.routes.transcription import router as transcription_router
+from app.api.routes.auth import router as auth_router
 
 from app.core.config import get_settings
 from app.core.database import close_pool, create_pool
@@ -78,6 +76,7 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(health_router)
+    application.include_router(auth_router)
     application.include_router(stories_router)
     application.include_router(participants_router)
     application.include_router(consents_router)

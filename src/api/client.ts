@@ -1,3 +1,5 @@
+import { supabase } from '../lib/supabase'
+
 // Central HTTP client. The base URL is read in exactly one place.
 
 export const API_BASE_URL: string = (
@@ -86,8 +88,8 @@ function parseErrorBody(body: unknown, status: number): ApiError {
 function networkError(): ApiError {
   return new ApiError(
     `Can't reach the Roots server at ${API_BASE_URL}. Check that the backend is running. ` +
-      `If your browser reports a CORS error, the backend needs CORS enabled for this origin ` +
-      `(see docs/FRONTEND_NOTES.md).`,
+    `If your browser reports a CORS error, the backend needs CORS enabled for this origin ` +
+    `(see docs/FRONTEND_NOTES.md).`,
     0,
     'network',
   )
@@ -121,6 +123,10 @@ export async function request<T>(
     headers['Content-Type'] = 'application/json'
     body = JSON.stringify(options.json)
   }
+
+  const { data: sessionData } = await supabase.auth.getSession()
+  if (sessionData.session?.access_token) headers.Authorization = `Bearer ${sessionData.session.access_token}`
+
 
   let response: Response
   try {
@@ -172,7 +178,6 @@ export function uploadForm<T>(
     const xhr = new XMLHttpRequest()
     xhr.open('POST', buildUrl(path))
     xhr.setRequestHeader('Accept', 'application/json')
-
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total)
     }
@@ -192,6 +197,16 @@ export function uploadForm<T>(
       else reject(parseErrorBody(payload, xhr.status))
     }
 
+    // Attach handlers before sending so fast responses are not missed.
+    void supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.access_token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${data.session.access_token}`)
+      }
+      if (xhr.readyState !== XMLHttpRequest.DONE) xhr.send(form)
+    }).catch(() => {
+      if (xhr.readyState !== XMLHttpRequest.DONE) xhr.send(form)
+    })
+
     if (signal) {
       if (signal.aborted) {
         xhr.abort()
@@ -199,6 +214,5 @@ export function uploadForm<T>(
       }
       signal.addEventListener('abort', () => xhr.abort(), { once: true })
     }
-    xhr.send(form)
   })
 }

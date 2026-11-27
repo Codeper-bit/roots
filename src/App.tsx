@@ -1,3 +1,5 @@
+import { AuthProvider, useAuth } from './auth/AuthContext'
+import { AuthPage } from './pages/AuthPage'
 import { AppLayout } from './components/layout/AppLayout'
 import { ToastProvider } from './components/ui/Toast'
 import { Routes, usePathname, type RouteDef } from './lib/router'
@@ -28,17 +30,19 @@ const APP_ROUTES: RouteDef[] = [
   { path: '/reviews', element: <ReviewsPage /> },
 ]
 
-export function App() {
+function AppContent() {
   const pathname = usePathname()
+  const { loading, session } = useAuth()
+  if (loading) return <div className="auth-loading">Loading Roots…</div>
+  if (pathname === '/login' || pathname === '/register') return <AuthPage mode={pathname === '/register' ? 'register' : 'login'} />
+  if (pathname !== '/' && !session) return <AuthPage mode="login" />
   return (
     <ToastProvider>
-      {pathname === '/' ? (
-        <LandingPage />
-      ) : (
-        <AppLayout>
-          <Routes routes={APP_ROUTES} fallback={<NotFoundPage />} />
-        </AppLayout>
-      )}
+      {pathname === '/' ? <LandingPage /> : <AppLayout><Routes routes={APP_ROUTES} fallback={<NotFoundPage />} /></AppLayout>}
     </ToastProvider>
   )
+}
+
+export function App() {
+  return <AuthProvider><AppContent /></AuthProvider>
 }

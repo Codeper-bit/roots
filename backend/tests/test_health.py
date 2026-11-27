@@ -1,3 +1,4 @@
+
 from contextlib import asynccontextmanager
 
 from fastapi.testclient import TestClient
@@ -27,6 +28,7 @@ class FakePool:
 
 class FakeSettings:
     supabase_storage_bucket = "roots-audio"
+    groq_api_key = None
 
 
 def make_client(monkeypatch, pool: FakePool) -> TestClient:
@@ -34,9 +36,6 @@ def make_client(monkeypatch, pool: FakePool) -> TestClient:
 
     async def fake_create_pool(settings):
         return pool
-
-    async def fake_close_pool(received_pool):
-        assert received_pool is pool
 
     monkeypatch.setattr(main_module, "get_settings", lambda: FakeSettings())
     monkeypatch.setattr(

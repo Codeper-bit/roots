@@ -1,29 +1,10 @@
-import { useState } from 'react'
-import { useUserId } from '../../lib/identity'
+import { useAuth } from '../../auth/AuthContext'
 import { Link } from '../../lib/router'
-import { shortId } from '../../utils/uuid'
-import { Icon, Wordmark } from '../ui/Icon'
-import { Modal } from '../ui/Modal'
+import { Wordmark } from '../ui/Icon'
 import { ApiStatus } from './ApiStatus'
-import { IdentityForm } from './IdentityForm'
+import { Button } from '../ui/Button'
 
 export function Header() {
-  const userId = useUserId()
-  const [open, setOpen] = useState(false)
-  return (
-    <header className="topbar">
-      <Link to="/" className="topbar__brand" aria-label="Roots home">
-        <Wordmark size={20} />
-      </Link>
-      <div className="topbar__spacer" />
-      <ApiStatus />
-      <button type="button" className="identity-chip" onClick={() => setOpen(true)}>
-        <Icon name="user" size={16} />
-        <span>{userId ? `User ${shortId(userId)}…` : 'Choose user'}</span>
-      </button>
-      <Modal open={open} title="Workspace user" onClose={() => setOpen(false)}>
-        <IdentityForm onDone={() => setOpen(false)} />
-      </Modal>
-    </header>
-  )
+  const { user, signOut } = useAuth()
+  return <header className="topbar"><Link to="/" className="topbar__brand" aria-label="Roots home"><Wordmark size={20} /></Link><div className="topbar__spacer" /><ApiStatus /><span className="muted small">{user?.email}</span><Button size="sm" variant="ghost" onClick={() => void signOut()}>Sign out</Button></header>
 }

@@ -17,9 +17,8 @@ export function LandingPage() {
       <header className="landing__nav">
         <Wordmark />
         <nav aria-label="Main" className="row">
-          <Link to="/dashboard" className="link">
-            Your stories
-          </Link>
+          <Link to="/login" className="link">Sign in</Link>
+          <Link to="/register" className="btn btn--primary btn--sm">Create account</Link>
         </nav>
       </header>
 
@@ -32,11 +31,11 @@ export function LandingPage() {
             original voice safe, and turn it into text they can read, correct and approve themselves.
           </p>
           <div className="row row--wrap">
-            <ButtonLink to="/stories/new" size="lg" iconRight="arrowRight">
+            <ButtonLink to="/register" size="lg" iconRight="arrowRight">
               Preserve a Story
             </ButtonLink>
-            <ButtonLink to="/dashboard" size="lg" variant="secondary">
-              Explore Stories
+            <ButtonLink to="/login" size="lg" variant="secondary">
+              Sign in
             </ButtonLink>
           </div>
         </div>
@@ -95,8 +94,7 @@ export function LandingPage() {
       <footer className="landing__foot">
         <Wordmark size={18} />
         <p className="muted small">
-          Early version. Sign-in is not built yet, so Roots is not ready to hold private family
-          recordings in production.
+          Your family stories remain private to your account. Always ask the storyteller for permission before recording or transcribing.
         </p>
       </footer>
     </div>
