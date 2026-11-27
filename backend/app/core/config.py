@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     # Groq transcription configuration
     groq_api_key: SecretStr | None = None
     groq_transcription_model: str = "whisper-large-v3-turbo"
-    groq_translation_model: str | None = None
+    groq_translation_model: str | None = "openai/gpt-oss-120b"
+    # Optional separate key for translation; falls back to GROQ_API_KEY when unset.
+    groq_translation_api_key: SecretStr | None = None
 
     @field_validator("database_url")
     @classmethod

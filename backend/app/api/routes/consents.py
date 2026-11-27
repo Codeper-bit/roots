@@ -1,12 +1,14 @@
-
-import asyncpg
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import asyncpg
+from fastapi import APIRouter, Depends, status
 
+from app.api.auth_dependencies import get_current_profile
+from app.api.authorization import require_consent, require_participant
 from app.api.dependencies import get_db_connection
+from app.core.errors import NotFoundError
 from app.schemas.common import ConsentPurpose
-from app.schemas.consent import ConsentCreate, ConsentRead, ConsentList
+from app.schemas.consent import ConsentCreate, ConsentList, ConsentRead
 from app.services import consent_service
 
 router = APIRouter(tags=["consents"])
@@ -19,15 +21,17 @@ router = APIRouter(tags=["consents"])
 )
 async def create_consent(
     payload: ConsentCreate,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ConsentRead:
-    consent = await consent_service.create_consent(
+    await require_participant(conn, payload.participant_id, profile)
+
+    return await consent_service.create_consent(
         conn,
         participant_id=payload.participant_id,
         purpose=payload.purpose,
         status=payload.status,
     )
-    return consent
 
 
 @router.get(
@@ -36,17 +40,10 @@ async def create_consent(
 )
 async def get_consent(
     consent_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ConsentRead:
-    consent = await consent_service.get_consent(conn, consent_id)
-
-    if consent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Consent record not found.",
-        )
-
-    return consent
+    return await require_consent(conn, consent_id, profile)
 
 
 @router.get(
@@ -55,8 +52,10 @@ async def get_consent(
 )
 async def list_consents(
     participant_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ConsentList:
+    await require_participant(conn, participant_id, profile)
     consents = await consent_service.list_consents(conn, participant_id)
     return {"consents": consents}
 
@@ -68,17 +67,17 @@ async def list_consents(
 async def get_active_consent(
     participant_id: UUID,
     purpose: ConsentPurpose,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ConsentRead:
+    await require_participant(conn, participant_id, profile)
+
     consent = await consent_service.get_active_consent(
         conn, participant_id, purpose
     )
 
     if consent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active consent found for this purpose.",
-        )
+        raise NotFoundError("No active consent found for this purpose.")
 
     return consent
 
@@ -89,14 +88,14 @@ async def get_active_consent(
 )
 async def withdraw_consent(
     consent_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ConsentRead:
+    await require_consent(conn, consent_id, profile)
+
     consent = await consent_service.withdraw_consent(conn, consent_id)
 
     if consent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Active consent record not found.",
-        )
+        raise NotFoundError("Active consent record not found.")
 
     return consent

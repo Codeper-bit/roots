@@ -1,10 +1,12 @@
-
 from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.auth_dependencies import get_current_profile
+from app.api.authorization import ensure_self, require_content_version
 from app.api.dependencies import get_db_connection
+from app.core.errors import ForbiddenError, NotFoundError
 from app.schemas.content import ContentReviewCreate, ContentReviewRead
 from app.services import content_service
 
@@ -18,13 +20,17 @@ router = APIRouter(prefix="/content-reviews", tags=["content reviews"])
 )
 async def create_content_review(
     payload: ContentReviewCreate,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ContentReviewRead:
+    await require_content_version(conn, payload.content_version_id, profile)
+    reviewer_id = ensure_self(payload.reviewer_id, profile, "reviewer_id")
+
     try:
         review = await content_service.review_content(
             conn,
             content_version_id=payload.content_version_id,
-            reviewer_id=payload.reviewer_id,
+            reviewer_id=reviewer_id,
             decision=payload.decision,
             comment=payload.comment,
         )
@@ -35,10 +41,7 @@ async def create_content_review(
         ) from exc
 
     if review is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Content version not found.",
-        )
+        raise NotFoundError("Content version not found.")
 
     return review
 
@@ -49,11 +52,11 @@ async def create_content_review(
 )
 async def get_content_reviews(
     content_version_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> list[ContentReviewRead]:
-    return await content_service.get_content_reviews(
-        conn, content_version_id
-    )
+    await require_content_version(conn, content_version_id, profile)
+    return await content_service.get_content_reviews(conn, content_version_id)
 
 
 @router.get(
@@ -62,8 +65,9 @@ async def get_content_reviews(
 )
 async def get_reviewer_history(
     reviewer_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> list[ContentReviewRead]:
-    return await content_service.get_reviewer_history(
-        conn, reviewer_id
-    )
+    if reviewer_id != profile["id"]:
+        raise ForbiddenError("You can only view your own review history.")
+    return await content_service.get_reviewer_history(conn, reviewer_id)

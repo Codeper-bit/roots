@@ -1,9 +1,12 @@
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 
+from app.api.auth_dependencies import get_current_profile
+from app.api.authorization import ensure_self
 from app.api.dependencies import get_db_connection
+from app.core.errors import NotFoundError
 from app.schemas.story import StoryCreate, StoryList, StoryRead
 from app.services import story_service
 
@@ -17,20 +20,19 @@ router = APIRouter(prefix="/stories", tags=["stories"])
 )
 async def create_story(
     payload: StoryCreate,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> StoryRead:
-    """Create a new story."""
+    """Create a story owned by the authenticated user."""
 
-    story = await story_service.create_story(
+    return await story_service.create_story(
         conn,
-        owner_id=payload.owner_id,
+        owner_id=ensure_self(payload.owner_id, profile, "owner_id"),
         title=payload.title,
         source_language=payload.source_language,
         description=payload.description,
         visibility=payload.visibility,
     )
-
-    return story
 
 
 @router.get(
@@ -39,14 +41,15 @@ async def create_story(
     status_code=status.HTTP_200_OK,
 )
 async def list_stories(
-    owner_id: UUID,
+    owner_id: UUID | None = None,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> StoryList:
-    """List all non-deleted stories belonging to a user."""
+    """List the authenticated user's non-deleted stories."""
 
     stories = await story_service.list_stories(
         conn,
-        owner_id,
+        ensure_self(owner_id, profile, "owner_id"),
     )
 
     return {
@@ -62,22 +65,20 @@ async def list_stories(
 )
 async def get_story(
     story_id: UUID,
-    owner_id: UUID,
+    owner_id: UUID | None = None,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> StoryRead:
-    """Retrieve a story belonging to a user."""
+    """Retrieve one of the authenticated user's stories."""
 
     story = await story_service.get_story(
         conn,
         story_id,
-        owner_id,
+        ensure_self(owner_id, profile, "owner_id"),
     )
 
     if story is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Story not found.",
-        )
+        raise NotFoundError("Story not found.")
 
     return story
 
@@ -89,21 +90,19 @@ async def get_story(
 )
 async def delete_story(
     story_id: UUID,
-    owner_id: UUID,
+    owner_id: UUID | None = None,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> Response:
-    """Soft-delete a story belonging to a user."""
+    """Soft-delete one of the authenticated user's stories."""
 
     story = await story_service.delete_story(
         conn,
         story_id,
-        owner_id,
+        ensure_self(owner_id, profile, "owner_id"),
     )
 
     if story is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Story not found.",
-        )
+        raise NotFoundError("Story not found.")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

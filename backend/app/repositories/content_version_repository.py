@@ -91,3 +91,50 @@ async def get_latest_content_version(
         content_type,
         language_code,
     )
+
+
+async def create_next_content_version(
+    conn: asyncpg.Connection,
+    story_id: UUID,
+    content_type: str,
+    language_code: str,
+    content: str,
+    origin: str,
+    based_on_version_id: UUID | None = None,
+    created_by: UUID | None = None,
+) -> asyncpg.Record:
+    """Insert the next version number for (story, type, language) atomically.
+
+    Reading "latest + 1" and inserting in two steps lets two concurrent requests
+    pick the same number; the second then fails on the UNIQUE constraint with a
+    500. A transaction-scoped advisory lock keyed on the same tuple serialises
+    them, so each gets its own consecutive number.
+    """
+    async with conn.transaction():
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            f"content_versions:{story_id}:{content_type}:{language_code}",
+        )
+        latest_number = await conn.fetchval(
+            """
+            SELECT COALESCE(MAX(version_number), 0)
+            FROM content_versions
+            WHERE story_id = $1
+              AND content_type = $2
+              AND language_code = $3;
+            """,
+            story_id,
+            content_type,
+            language_code,
+        )
+        return await create_content_version(
+            conn,
+            story_id,
+            content_type,
+            language_code,
+            latest_number + 1,
+            content,
+            origin,
+            based_on_version_id=based_on_version_id,
+            created_by=created_by,
+        )

@@ -80,6 +80,10 @@ async def update_processing_job_status(
         SET
             status = $2,
             error_message = $3,
+            attempts = CASE
+                WHEN $2 = 'running' THEN attempts + 1
+                ELSE attempts
+            END,
             completed_at = CASE
                 WHEN $2 IN ('succeeded', 'failed', 'cancelled')
                 THEN now()

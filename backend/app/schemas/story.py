@@ -13,8 +13,9 @@ from app.schemas.common import (
 
 
 class StoryCreate(Schema):
-    # Temporary until authentication supplies the owner ID.
-    owner_id: UUID
+    # Ignored in practice: the owner is always the authenticated user. If a
+    # client still sends it, it must equal that user's id (see ensure_self).
+    owner_id: UUID | None = None
 
     title: str = Field(min_length=1, max_length=200)
     source_language: str = Field(pattern=r"^[a-z]{2,3}$")

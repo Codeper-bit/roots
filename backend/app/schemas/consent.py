@@ -2,8 +2,6 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import model_validator
-
 from app.schemas.common import (
     ConsentDecision,
     ConsentPurpose,

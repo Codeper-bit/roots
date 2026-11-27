@@ -5,6 +5,7 @@ import asyncpg
 from app.repositories import (
     content_review_repository,
     content_version_repository,
+    language_repository,
 )
 
 
@@ -82,25 +83,15 @@ async def create_content_version(
             "Only human-edited content can have a base version."
         )
 
-    latest = await content_version_repository.get_latest_content_version(
+    if not await language_repository.is_language_available(conn, language_code):
+        raise ValueError(f"The language '{language_code}' isn't available yet.")
+
+    # Race-free numbering: concurrent saves get consecutive version numbers.
+    return await content_version_repository.create_next_content_version(
         conn,
         story_id,
         content_type,
         language_code,
-    )
-
-    version_number = (
-        latest["version_number"] + 1
-        if latest is not None
-        else 1
-    )
-
-    return await content_version_repository.create_content_version(
-        conn,
-        story_id,
-        content_type,
-        language_code,
-        version_number,
         content.strip(),
         origin,
         based_on_version_id=based_on_version_id,

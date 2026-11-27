@@ -1,42 +1,49 @@
+"""Speech-to-text through Groq (Whisper), reading audio from private storage."""
+
+from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
+import groq
 from groq import AsyncGroq
 from supabase import Client
 
+from app.core.errors import UnprocessableError, UpstreamError
+from app.services.groq_errors import translate_groq_error
+from app.services.speech_languages import whisper_supports
+
+logger = logging.getLogger(__name__)
 
 MAX_GROQ_AUDIO_SIZE = 25 * 1024 * 1024
+REQUEST_TIMEOUT_SECONDS = 180.0
+MAX_RETRIES = 2
 
-CONTENT_TYPE_EXTENSIONS = {
-    "audio/mpeg": ".mp3",
-    "audio/mp3": ".mp3",
-    "audio/mp4": ".mp4",
-    "audio/x-m4a": ".m4a",
-    "audio/m4a": ".m4a",
-    "audio/wav": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/wave": ".wav",
-    "audio/ogg": ".ogg",
-    "audio/flac": ".flac",
-    "audio/webm": ".webm",
-    "video/mp4": ".mp4",
+# bare media type -> (file extension, MIME type sent to Groq)
+_AUDIO_FORMATS: dict[str, tuple[str, str]] = {
+    "audio/mpeg": (".mp3", "audio/mpeg"),
+    "audio/mp3": (".mp3", "audio/mpeg"),
+    "audio/mp4": (".mp4", "audio/mp4"),
+    "audio/x-m4a": (".m4a", "audio/mp4"),
+    "audio/m4a": (".m4a", "audio/mp4"),
+    "audio/wav": (".wav", "audio/wav"),
+    "audio/x-wav": (".wav", "audio/wav"),
+    "audio/wave": (".wav", "audio/wav"),
+    "audio/ogg": (".ogg", "audio/ogg"),
+    "audio/flac": (".flac", "audio/flac"),
+    "audio/webm": (".webm", "audio/webm"),
+    "video/mp4": (".mp4", "video/mp4"),
 }
 
-CONTENT_TYPE_MIME = {
-    "audio/mpeg": "audio/mpeg",
-    "audio/mp3": "audio/mpeg",
-    "audio/mp4": "audio/mp4",
-    "audio/x-m4a": "audio/mp4",
-    "audio/m4a": "audio/mp4",
-    "audio/wav": "audio/wav",
-    "audio/x-wav": "audio/wav",
-    "audio/wave": "audio/wav",
-    "audio/ogg": "audio/ogg",
-    "audio/flac": "audio/flac",
-    "audio/webm": "audio/webm",
-    "video/mp4": "video/mp4",
-}
+UNSUPPORTED_FORMAT_MESSAGE = (
+    "This audio format can't be transcribed. Use MP3, WAV, M4A, MP4, OGG, FLAC, or WebM."
+)
+
+
+def _bare_media_type(mime_type: str | None) -> str:
+    """'audio/webm;codecs=opus' -> 'audio/webm'."""
+    return (mime_type or "").split(";", 1)[0].strip().lower()
 
 
 class GroqTranscriptionEngine:
@@ -50,71 +57,79 @@ class GroqTranscriptionEngine:
         storage_client: Client,
         bucket_name: str,
     ) -> None:
-        self.client = AsyncGroq(api_key=api_key)
+        self.client = AsyncGroq(
+            api_key=api_key,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            max_retries=MAX_RETRIES,
+        )
         self.model = model
         self.storage_client = storage_client
         self.bucket_name = bucket_name
 
-    async def __call__(
-        self,
-        *,
-        audio_asset: Any,
-        language_code: str | None,
-    ) -> str:
+    async def __call__(self, *, audio_asset: Any, language_code: str | None) -> str:
+        # NOTE: the database column is mime_type, not content_type.
+        fmt = _AUDIO_FORMATS.get(_bare_media_type(audio_asset["mime_type"]))
+        if fmt is None:
+            raise UnprocessableError(UNSUPPORTED_FORMAT_MESSAGE)
+        extension, groq_mime_type = fmt
 
-        # Database column is mime_type, NOT content_type.
-        storage_key = audio_asset["storage_key"]
-        mime_type = audio_asset["mime_type"]
-
-        extension = CONTENT_TYPE_EXTENSIONS.get(mime_type)
-        groq_mime_type = CONTENT_TYPE_MIME.get(mime_type)
-
-        if extension is None or groq_mime_type is None:
-            raise ValueError(
-                f"Audio format '{mime_type}' is not supported. "
-                "Use MP3, WAV, M4A, MP4, OGG, FLAC, or WebM."
+        # Reject oversized files from metadata before downloading anything.
+        declared_size = audio_asset["size_bytes"]
+        if declared_size is not None and declared_size > MAX_GROQ_AUDIO_SIZE:
+            raise UnprocessableError(
+                "This recording is larger than the 25 MB the transcription service accepts."
             )
 
-        # Download audio from private Supabase Storage.
-        audio_bytes = await asyncio.to_thread(
-            self.storage_client.storage
-            .from_(self.bucket_name)
-            .download,
-            storage_key,
-        )
-
+        audio_bytes = await self._download(audio_asset["storage_key"])
         if not audio_bytes:
-            raise ValueError("The uploaded audio file is empty.")
-
+            raise UnprocessableError("The uploaded audio file is empty.")
         if len(audio_bytes) > MAX_GROQ_AUDIO_SIZE:
-            raise ValueError(
-                "The audio file exceeds the configured 25 MB limit."
+            raise UnprocessableError(
+                "This recording is larger than the 25 MB the transcription service accepts."
             )
 
-        request_args = {
-            "file": (
-                f"recording{extension}",
-                audio_bytes,
-                groq_mime_type,
-            ),
+        request_args: dict[str, Any] = {
+            "file": (f"recording{extension}", audio_bytes, groq_mime_type),
             "model": self.model,
             "response_format": "json",
             "temperature": 0.0,
         }
-
-        if language_code:
+        if whisper_supports(language_code):
             request_args["language"] = language_code
+        else:
+            # Whisper rejects language hints it wasn't trained on (e.g. Igbo, "ig")
+            # with HTTP 400. Fall back to auto-detection instead of failing.
+            logger.warning(
+                "Language %r is not supported by Whisper; transcribing without a language hint.",
+                language_code,
+            )
 
-        result = await self.client.audio.transcriptions.create(
-            **request_args
-        )
+        try:
+            result = await self.client.audio.transcriptions.create(**request_args)
+        except groq.GroqError as exc:
+            logger.warning(
+                "Groq transcription failed (%s: %s)", type(exc).__name__, exc
+            )
+            raise translate_groq_error(exc, task="transcription") from exc
 
-        transcript = result.text.strip()
-
+        transcript = (getattr(result, "text", "") or "").strip()
         if not transcript:
-            raise ValueError("Groq returned an empty transcription.")
-
+            raise UnprocessableError(
+                "No speech could be recognised in this recording."
+            )
         return transcript
+
+    async def _download(self, storage_key: str) -> bytes:
+        try:
+            return await asyncio.to_thread(
+                self.storage_client.storage.from_(self.bucket_name).download,
+                storage_key,
+            )
+        except Exception as exc:  # supabase-py raises a variety of types
+            logger.exception("Could not download %s from storage", storage_key)
+            raise UpstreamError(
+                "Couldn't read the recording from storage. Try again."
+            ) from exc
 
     async def close(self) -> None:
         await self.client.close()

@@ -1,10 +1,12 @@
-
-import asyncpg
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.auth_dependencies import get_current_profile
+from app.api.authorization import require_participant, require_story
 from app.api.dependencies import get_db_connection
+from app.core.errors import NotFoundError
 from app.schemas.participant import (
     ParticipantCreate,
     ParticipantRead,
@@ -22,16 +24,18 @@ router = APIRouter(tags=["participants"])
 )
 async def create_participant(
     payload: ParticipantCreate,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ParticipantRead:
-    participant = await participant_service.create_participant(
+    await require_story(conn, payload.story_id, profile)
+
+    return await participant_service.create_participant(
         conn,
         story_id=payload.story_id,
         user_id=payload.user_id,
         display_name=payload.display_name,
         role=payload.role,
     )
-    return participant
 
 
 @router.get(
@@ -40,19 +44,10 @@ async def create_participant(
 )
 async def get_participant(
     participant_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ParticipantRead:
-    participant = await participant_service.get_participant(
-        conn, participant_id
-    )
-
-    if participant is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Participant not found.",
-        )
-
-    return participant
+    return await require_participant(conn, participant_id, profile)
 
 
 @router.get(
@@ -61,8 +56,10 @@ async def get_participant(
 )
 async def list_participants(
     story_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> list[ParticipantRead]:
+    await require_story(conn, story_id, profile)
     return await participant_service.list_participants(conn, story_id)
 
 
@@ -74,6 +71,7 @@ async def update_participant(
     story_id: UUID,
     participant_id: UUID,
     payload: ParticipantUpdate,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ParticipantRead:
     if payload.display_name is None and payload.role is None:
@@ -81,6 +79,8 @@ async def update_participant(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Provide at least one field to update.",
         )
+
+    await require_story(conn, story_id, profile)
 
     participant = await participant_service.update_participant(
         conn,
@@ -91,9 +91,6 @@ async def update_participant(
     )
 
     if participant is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Participant not found.",
-        )
+        raise NotFoundError("Participant not found.")
 
     return participant

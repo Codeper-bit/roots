@@ -1,5 +1,4 @@
 
-from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 from uuid import UUID

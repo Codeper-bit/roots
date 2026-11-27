@@ -1,14 +1,17 @@
 
-from uuid import UUID
+import logging
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.auth_dependencies import get_current_profile
 from app.api.dependencies import get_db_connection
+from app.core.errors import DomainError
 from app.schemas.content import ContentVersionRead
 from app.schemas.translation import TranslationCreate
 from app.services import story_service, translation_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["translation"])
 
@@ -69,7 +72,10 @@ async def translate_transcript(
             detail=str(exc),
         ) from exc
 
+    except DomainError:
+        raise  # carries a user-safe message and status; handled in main.py
     except Exception:
+        logger.exception("Unexpected translation failure")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Translation failed. Please try again.",

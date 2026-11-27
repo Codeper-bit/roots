@@ -1,10 +1,12 @@
-
 from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.api.auth_dependencies import get_current_profile
+from app.api.authorization import ensure_self, require_content_version, require_story
 from app.api.dependencies import get_db_connection
+from app.core.errors import NotFoundError
 from app.schemas.content import ContentVersionCreate, ContentVersionRead
 from app.services import content_service
 
@@ -18,10 +20,14 @@ router = APIRouter(tags=["content"])
 )
 async def create_content_version(
     payload: ContentVersionCreate,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ContentVersionRead:
+    await require_story(conn, payload.story_id, profile)
+    created_by = ensure_self(payload.created_by, profile, "created_by")
+
     try:
-        version = await content_service.create_content_version(
+        return await content_service.create_content_version(
             conn,
             story_id=payload.story_id,
             content_type=payload.content_type,
@@ -29,15 +35,13 @@ async def create_content_version(
             content=payload.content,
             origin=payload.origin,
             based_on_version_id=payload.based_on_version_id,
-            created_by=payload.created_by,
+            created_by=created_by,
         )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-
-    return version
 
 
 @router.get(
@@ -46,19 +50,10 @@ async def create_content_version(
 )
 async def get_content_version(
     content_version_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ContentVersionRead:
-    version = await content_service.get_content_version(
-        conn, content_version_id
-    )
-
-    if version is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Content version not found.",
-        )
-
-    return version
+    return await require_content_version(conn, content_version_id, profile)
 
 
 @router.get(
@@ -67,11 +62,11 @@ async def get_content_version(
 )
 async def get_story_content_versions(
     story_id: UUID,
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> list[ContentVersionRead]:
-    return await content_service.get_story_content_versions(
-        conn, story_id
-    )
+    await require_story(conn, story_id, profile)
+    return await content_service.get_story_content_versions(conn, story_id)
 
 
 @router.get(
@@ -82,8 +77,11 @@ async def get_latest_content(
     story_id: UUID,
     content_type: str = Query(...),
     language_code: str = Query(...),
+    profile: asyncpg.Record = Depends(get_current_profile),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> ContentVersionRead:
+    await require_story(conn, story_id, profile)
+
     try:
         version = await content_service.get_latest_content(
             conn,
@@ -98,9 +96,6 @@ async def get_latest_content(
         ) from exc
 
     if version is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No matching content version found.",
-        )
+        raise NotFoundError("No matching content version found.")
 
     return version

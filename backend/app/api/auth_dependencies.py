@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
 import asyncpg
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from gotrue.errors import AuthApiError
+
+try:  # supabase-py >= 2.16 renamed the package
+    from supabase_auth.errors import AuthApiError
+except ImportError:  # pragma: no cover
+    from gotrue.errors import AuthApiError
 
 from app.api.dependencies import get_db_connection
 
