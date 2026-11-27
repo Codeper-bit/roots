@@ -15,6 +15,11 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
 
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
     # PostgreSQL configuration
     database_url: SecretStr
     db_pool_min_size: int = Field(default=2, ge=1)

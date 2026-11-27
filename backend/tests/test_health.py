@@ -29,6 +29,7 @@ class FakePool:
 class FakeSettings:
     supabase_storage_bucket = "roots-audio"
     groq_api_key = None
+    cors_origins = ["http://localhost:5173"]
 
 
 def make_client(monkeypatch, pool: FakePool) -> TestClient:
