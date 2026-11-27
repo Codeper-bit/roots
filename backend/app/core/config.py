@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # Groq transcription configuration
     groq_api_key: SecretStr | None = None
     groq_transcription_model: str = "whisper-large-v3-turbo"
+    groq_translation_model: str | None = None
 
     @field_validator("database_url")
     @classmethod
