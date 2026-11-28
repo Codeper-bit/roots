@@ -22,7 +22,12 @@ import type { ContentVersion } from '../types'
 import { describeError } from '../utils/errors'
 import { formatDateTime } from '../utils/formatDate'
 import { formatBytes, formatDuration } from '../utils/formatDuration'
-import { LANGUAGE_CODE_PATTERN, SEEDED_LANGUAGES, languageName } from '../utils/languages'
+import {
+  LANGUAGE_CODE_PATTERN,
+  SEEDED_LANGUAGES,
+  hasLimitedSpeechRecognition,
+  languageName,
+} from '../utils/languages'
 
 export function TranscriptionPage() {
   const { storyId } = useParams()
@@ -34,6 +39,10 @@ export function TranscriptionPage() {
 }
 
 type Tab = 'transcript' | 'translation' | 'details'
+
+// A job the server still calls queued/running after this long was almost
+// certainly interrupted (server restart, closed tab); don't lock the page on it.
+const STALE_JOB_MS = 10 * 60 * 1000
 
 function Workspace({ ctx }: { ctx: StoryContext }) {
   const { story, participant, ownerId } = ctx
@@ -52,11 +61,17 @@ function Workspace({ ctx }: { ctx: StoryContext }) {
     [story.id],
   )
 
+  // The API returns jobs newest-first; everything below assumes oldest-first.
+  const jobs = useMemo(
+    () => [...(data.data?.jobs ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    [data.data],
+  )
+
   // Audio: the id saved by the recording step, else the newest transcription job's audio.
   const jobAudioId = useMemo(() => {
-    const withAudio = (data.data?.jobs ?? []).filter((j) => j.audio_asset_id)
+    const withAudio = jobs.filter((j) => j.audio_asset_id)
     return withAudio.length ? withAudio[withAudio.length - 1].audio_asset_id : null
-  }, [data.data])
+  }, [jobs])
   const audioAssetId = workflow.audioAssetId ?? jobAudioId ?? null
   const asset = useAsync(
     async (signal) => (audioAssetId ? getAudioAsset(audioAssetId, signal) : null),
@@ -74,19 +89,21 @@ function Workspace({ ctx }: { ctx: StoryContext }) {
 
   const languageCode = useCustom ? customLanguage.trim().toLowerCase() : language
   const versions = data.data?.versions ?? []
-  const jobs = data.data?.jobs ?? []
 
   const transcripts = versions.filter((v) => v.content_type === 'transcript')
   const activeLang =
     transcripts.some((v) => v.language_code === story.source_language)
       ? story.source_language
-      : (transcripts.sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.language_code ?? story.source_language)
+      : ([...transcripts].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.language_code ?? story.source_language)
   const latest: ContentVersion | null =
     transcripts.filter((v) => v.language_code === activeLang).sort((a, b) => b.version_number - a.version_number)[0] ?? null
 
   const transcriptionJobs = jobs.filter((j) => j.job_type === 'transcription')
   const lastJob = transcriptionJobs[transcriptionJobs.length - 1]
-  const serverBusy = lastJob != null && (lastJob.status === 'queued' || lastJob.status === 'running')
+  const serverBusy =
+    lastJob != null &&
+    (lastJob.status === 'queued' || lastJob.status === 'running') &&
+    Date.now() - Date.parse(lastJob.updated_at) < STALE_JOB_MS
 
   // Poll while the server reports a job we did not start in this tab (e.g. after a refresh).
   const reload = data.reload
@@ -246,6 +263,7 @@ function Workspace({ ctx }: { ctx: StoryContext }) {
                 translationConsent={translationConsent}
                 consentHref={consentHref}
                 userId={ownerId}
+                participantId={participant?.id ?? null}
                 onSaved={data.reload}
               />
             </section>
@@ -307,6 +325,13 @@ function Workspace({ ctx }: { ctx: StoryContext }) {
           <Button variant="ghost" size="sm" onClick={() => setUseCustom((v) => !v)} disabled={running}>
             {useCustom ? 'Pick from list' : 'Use another language code'}
           </Button>
+          {hasLimitedSpeechRecognition(languageCode) && (
+            <Notice tone="warning" title={`${languageName(languageCode)} support is limited`}>
+              The speech model wasn’t trained on {languageName(languageCode)}, so it has to guess
+              what it hears. Expect many mistakes. Treat the result as a rough starting point and
+              correct it carefully, or type the transcript yourself.
+            </Notice>
+          )}
           {blockers.map((b) => (
             <p key={b} className="muted small">
               <Icon name="info" size={14} /> {b}

@@ -10,13 +10,21 @@ export function ApiStatus() {
 
   useEffect(() => {
     let cancelled = false
+    let failures = 0
     const run = () => {
       checkHealth()
-        .then(() => !cancelled && setStatus({ state: 'online' }))
-        .catch((err) => !cancelled && setStatus({ state: 'offline', reason: describeError(err) }))
+        .then(() => {
+          failures = 0
+          if (!cancelled) setStatus({ state: 'online' })
+        })
+        .catch((err) => {
+          // A single missed check (server reload, brief network blip) shouldn't flash "unreachable".
+          failures += 1
+          if (!cancelled && failures >= 2) setStatus({ state: 'offline', reason: describeError(err) })
+        })
     }
     run()
-    const id = window.setInterval(run, 30000)
+    const id = window.setInterval(run, 15000)
     return () => {
       cancelled = true
       window.clearInterval(id)

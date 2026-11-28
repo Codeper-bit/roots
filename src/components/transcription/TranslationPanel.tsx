@@ -1,11 +1,17 @@
 import { useMemo, useState } from 'react'
 import { createContentVersion } from '../../api/content'
+import { translateTranscript } from '../../api/translation'
 import { Link } from '../../lib/router'
 import type { ConsentState } from '../../lib/consent'
 import type { ContentVersion } from '../../types'
 import { describeError } from '../../utils/errors'
 import { formatDate } from '../../utils/formatDate'
-import { LANGUAGE_CODE_PATTERN, SEEDED_LANGUAGES, languageName } from '../../utils/languages'
+import {
+  LANGUAGE_CODE_PATTERN,
+  SEEDED_LANGUAGES,
+  canTranslateAutomatically,
+  languageName,
+} from '../../utils/languages'
 import { Badge, OriginBadge, ReviewBadge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Input, Select, Textarea } from '../ui/Field'
@@ -15,10 +21,11 @@ import { useToast } from '../ui/Toast'
 /**
  * Original and translation side by side.
  *
- * The backend can STORE translations (content_type "translation") but has no
- * endpoint that CREATES one automatically, so nothing here is machine
- * translated. A person can write or correct a translation; it is saved as a
- * normal content version and goes through review like any other text.
+ * A translation can be created two ways, and both end up as a normal content
+ * version that goes through human review like any other text:
+ *   - "Translate with AI" asks the backend (POST /translations). The result is
+ *     marked AI-generated and unreviewed.
+ *   - "Write a translation" lets a person type or correct one by hand.
  */
 export function TranslationPanel({
   storyId,
@@ -28,6 +35,7 @@ export function TranslationPanel({
   translationConsent,
   consentHref,
   userId,
+  participantId,
   onSaved,
   readOnly = false,
 }: {
@@ -38,6 +46,8 @@ export function TranslationPanel({
   translationConsent: ConsentState | 'unknown'
   consentHref: string
   userId: string
+  /** The storyteller whose consent covers translation. Needed for AI translation. */
+  participantId?: string | null
   onSaved: () => void
   readOnly?: boolean
 }) {
@@ -55,6 +65,7 @@ export function TranslationPanel({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const [translating, setTranslating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const targetCode = customMode ? custom.trim().toLowerCase() : target
@@ -67,6 +78,28 @@ export function TranslationPanel({
     [translationVersions, targetCode],
   )
   const consentOk = translationConsent === 'granted'
+  const canAutoTranslate =
+    !!participantId && !!original && canTranslateAutomatically(targetCode) && targetCode !== sourceLanguage
+
+  async function translateWithAi() {
+    if (translating || !participantId || !original || !canAutoTranslate) return
+    setTranslating(true)
+    setError(null)
+    try {
+      await translateTranscript({
+        story_id: storyId,
+        participant_id: participantId,
+        source_version_id: original.id,
+        target_language_code: targetCode,
+      })
+      toast.success('Translation created. It is an AI draft, so please have a person review it.')
+      onSaved()
+    } catch (err) {
+      setError(describeError(err))
+    } finally {
+      setTranslating(false)
+    }
+  }
 
   function beginEdit() {
     setDraft(latest?.content ?? '')
@@ -194,17 +227,30 @@ export function TranslationPanel({
               </p>
             </>
           ) : (
-            <Notice tone="info" title="Translation not available yet">
-              Roots can’t translate automatically yet, so nothing is shown here until a person adds a
-              translation. Nothing has been machine-translated or guessed.
+            <Notice tone="info" title="No translation yet">
+              {canAutoTranslate
+                ? `Use “Translate with AI” to create a ${languageName(targetCode)} draft, or write one yourself. AI translations are always marked as drafts until a person reviews them.`
+                : 'Write the translation yourself. Automatic translation is only available for English, Yoruba, Hausa and Igbo.'}
+            </Notice>
+          )}
+          {!editing && error && (
+            <Notice tone="error" title="Couldn’t translate">
+              {error}
             </Notice>
           )}
           {!editing && !readOnly && validTarget && original && (
             <>
               {consentOk ? (
-                <Button variant="secondary" icon="edit" onClick={beginEdit}>
-                  {latest ? 'Edit translation' : 'Write a translation'}
-                </Button>
+                <div className="row row--wrap">
+                  {canAutoTranslate && (
+                    <Button icon="sparkles" onClick={translateWithAi} loading={translating}>
+                      {latest ? 'Translate again with AI' : 'Translate with AI'}
+                    </Button>
+                  )}
+                  <Button variant="secondary" icon="edit" onClick={beginEdit} disabled={translating}>
+                    {latest ? 'Edit translation' : 'Write a translation'}
+                  </Button>
+                </div>
               ) : (
                 <Notice tone="warning" title="Translation permission needed">
                   {translationConsent === 'unknown'

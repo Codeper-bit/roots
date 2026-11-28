@@ -8,6 +8,7 @@ export const API_BASE_URL: string = (
 
 export type ApiErrorKind =
   | 'network'
+  | 'unauthorized' // 401
   | 'validation' // 400 / 422
   | 'consent' // 403
   | 'not_found' // 404
@@ -43,6 +44,7 @@ interface FastApiValidationItem {
 }
 
 function kindForStatus(status: number): ApiErrorKind {
+  if (status === 401) return 'unauthorized'
   if (status === 400 || status === 422) return 'validation'
   if (status === 403) return 'consent'
   if (status === 404) return 'not_found'
@@ -87,12 +89,33 @@ function parseErrorBody(body: unknown, status: number): ApiError {
 
 function networkError(): ApiError {
   return new ApiError(
-    `Can't reach the Roots server at ${API_BASE_URL}. Check that the backend is running. ` +
-    `If your browser reports a CORS error, the backend needs CORS enabled for this origin ` +
-    `(see docs/FRONTEND_NOTES.md).`,
+    `Can't reach the Roots server at ${API_BASE_URL}. Check your internet connection and that the ` +
+      `backend is running. (Errors the server reports itself, such as a failed transcription, are ` +
+      `shown with their own message instead.)`,
     0,
     'network',
   )
+}
+
+function abortError(): DOMException {
+  return new DOMException('The request was cancelled', 'AbortError')
+}
+
+/**
+ * The current Supabase access token, or null when signed out. Never throws:
+ * a storage hiccup must not turn into a confusing failure on every request.
+ */
+async function getAccessToken(forceRefresh = false): Promise<string | null> {
+  try {
+    if (forceRefresh) {
+      const { data } = await supabase.auth.refreshSession()
+      return data.session?.access_token ?? null
+    }
+    const { data } = await supabase.auth.getSession()
+    return data.session?.access_token ?? null
+  } catch {
+    return null
+  }
 }
 
 function buildUrl(path: string, query?: Record<string, string | number | undefined>): string {
@@ -117,28 +140,27 @@ export async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  let body: string | undefined
-  if (options.json !== undefined) {
-    headers['Content-Type'] = 'application/json'
-    body = JSON.stringify(options.json)
+  const url = buildUrl(path, options.query)
+  const body = options.json !== undefined ? JSON.stringify(options.json) : undefined
+
+  const send = async (token: string | null): Promise<Response> => {
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    if (token) headers.Authorization = `Bearer ${token}`
+    try {
+      return await fetch(url, { method, headers, body, signal: options.signal })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      throw networkError()
+    }
   }
 
-  const { data: sessionData } = await supabase.auth.getSession()
-  if (sessionData.session?.access_token) headers.Authorization = `Bearer ${sessionData.session.access_token}`
+  let response = await send(await getAccessToken())
 
-
-  let response: Response
-  try {
-    response = await fetch(buildUrl(path, options.query), {
-      method,
-      headers,
-      body,
-      signal: options.signal,
-    })
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err
-    throw networkError()
+  // An access token can expire while the page is open. Refresh once and retry.
+  if (response.status === 401) {
+    const refreshed = await getAccessToken(true)
+    if (refreshed) response = await send(refreshed)
   }
 
   if (response.status === 204) return undefined as T
@@ -175,44 +197,55 @@ export function uploadForm<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError())
+      return
+    }
+
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', buildUrl(path))
-    xhr.setRequestHeader('Accept', 'application/json')
+    let settled = false
+
+    const settle = (action: () => void) => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', onAbort)
+      action()
+    }
+    const onAbort = () => {
+      xhr.abort()
+      settle(() => reject(abortError()))
+    }
+
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total)
     }
-    xhr.onerror = () => reject(networkError())
-    xhr.ontimeout = () => reject(networkError())
-    xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'))
-    xhr.onload = () => {
-      let payload: unknown = null
-      if (xhr.responseText) {
-        try {
-          payload = JSON.parse(xhr.responseText)
-        } catch {
-          payload = null
+    xhr.onerror = () => settle(() => reject(networkError()))
+    xhr.ontimeout = () => settle(() => reject(networkError()))
+    xhr.onabort = () => settle(() => reject(abortError()))
+    xhr.onload = () =>
+      settle(() => {
+        let payload: unknown = null
+        if (xhr.responseText) {
+          try {
+            payload = JSON.parse(xhr.responseText)
+          } catch {
+            payload = null
+          }
         }
-      }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(payload as T)
-      else reject(parseErrorBody(payload, xhr.status))
-    }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(payload as T)
+        else reject(parseErrorBody(payload, xhr.status))
+      })
 
-    // Attach handlers before sending so fast responses are not missed.
-    void supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.access_token) {
-        xhr.setRequestHeader('Authorization', `Bearer ${data.session.access_token}`)
-      }
-      if (xhr.readyState !== XMLHttpRequest.DONE) xhr.send(form)
-    }).catch(() => {
-      if (xhr.readyState !== XMLHttpRequest.DONE) xhr.send(form)
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    // The token is fetched first, then the request is opened and sent in one
+    // go, so an abort can never land between open() and send().
+    void getAccessToken().then((token) => {
+      if (settled) return
+      xhr.open('POST', buildUrl(path))
+      xhr.setRequestHeader('Accept', 'application/json')
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.send(form)
     })
-
-    if (signal) {
-      if (signal.aborted) {
-        xhr.abort()
-        return
-      }
-      signal.addEventListener('abort', () => xhr.abort(), { once: true })
-    }
   })
 }

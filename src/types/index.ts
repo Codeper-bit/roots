@@ -176,6 +176,14 @@ export interface ProcessingJob {
   completed_at: string | null
 }
 
+// ---- Translation ---------------------------------------------------------
+export interface TranslationCreate {
+  story_id: UUID
+  participant_id: UUID
+  source_version_id: UUID
+  target_language_code: string
+}
+
 // ---- Story questions -----------------------------------------------------
 export interface StoryQuestion {
   id: UUID

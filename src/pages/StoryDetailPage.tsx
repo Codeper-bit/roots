@@ -4,6 +4,7 @@ import { listContentVersions } from '../api/content'
 import { listStoryProcessingJobs } from '../api/processing'
 import { StoryScope, type StoryContext } from '../components/layout/StoryScope'
 import { AudioPlayer } from '../components/recording/AudioPlayer'
+import { ShareStory } from '../components/story/ShareStory'
 import { StoryQuestions } from '../components/story/StoryQuestions'
 import { TranslationPanel } from '../components/transcription/TranslationPanel'
 import { Badge, JobBadge, OriginBadge, ReviewBadge, StoryStatusBadge } from '../components/ui/Badge'
@@ -88,7 +89,17 @@ function Detail({ ctx }: { ctx: StoryContext }) {
             <Badge>{story.visibility === 'family' ? 'Family' : 'Private'}</Badge>
             <Badge>Told in {languageName(story.source_language)}</Badge>
           </div>
-          <span className="muted small">Created {formatDate(story.created_at)}</span>
+          <div className="row row--wrap">
+            <span className="muted small">Created {formatDate(story.created_at)}</span>
+            <ShareStory
+              story={story}
+              versions={versions}
+              storyteller={(participants.find((p) => p.role === 'storyteller') ?? participant)?.display_name ?? null}
+              sharingConsent={consents.data?.byPurpose.family_sharing.state ?? 'unknown'}
+              consentHref={`/stories/${story.id}/consent${pid}`}
+              reviewHref={`/stories/${story.id}/review`}
+            />
+          </div>
         </div>
         {story.description ? <p className="story-desc">{story.description}</p> : <p className="muted">No description.</p>}
         <div>
@@ -205,6 +216,7 @@ function Detail({ ctx }: { ctx: StoryContext }) {
                   translationConsent={consents.data?.byPurpose.translation.state ?? 'unknown'}
                   consentHref={`/stories/${story.id}/consent${pid}`}
                   userId={ownerId}
+                  participantId={participant?.id ?? null}
                   onSaved={data.reload}
                 />
               </section>

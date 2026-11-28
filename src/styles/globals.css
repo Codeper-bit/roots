@@ -356,3 +356,7 @@ code { background: var(--sage-soft); padding: 1px 6px; border-radius: 6px; font-
 .auth-switch { text-align: center; }
 .auth-show { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: .9rem; }
 .auth-loading { min-height: 100vh; display: grid; place-items: center; color: var(--forest); font-weight: 600; }
+
+/* Share dialog */
+.share__preview { white-space: pre-wrap; word-break: break-word; font-family: var(--serif); line-height: 1.6; background: #fbfaf6; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; max-height: 240px; overflow: auto; margin: 0; }
+.share__actions { display: flex; flex-wrap: wrap; gap: 10px; }

@@ -6,6 +6,8 @@ export function describeError(error: unknown): string {
     switch (error.kind) {
       case 'network':
         return error.message
+      case 'unauthorized':
+        return 'Your session has expired. Please sign in again.'
       case 'validation':
         return error.message
       case 'consent':
